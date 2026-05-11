@@ -48,14 +48,17 @@ def send(chat_id, text):
     except:
         pass
 
-def get_file(file_id):
-    r = requests.get(BASE_URL + f"/getFile?file_id={file_id}").json()
-    file_path = r["result"]["file_path"]
-    file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
-    return requests.get(file_url).text
+def download_file(file_id):
+    try:
+        r = requests.get(BASE_URL + f"/getFile?file_id={file_id}").json()
+        file_path = r["result"]["file_path"]
+        file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+        return requests.get(file_url).text
+    except:
+        return None
 
 # =========================
-# LOOP CONTROL
+# UPDATES
 # =========================
 last_update_id = None
 
@@ -75,7 +78,7 @@ def deploy_app(name, file):
     path = f"deploy/{file}"
 
     if not os.path.exists(path):
-        return "❌ File not found"
+        return "❌ File not found in deploy/"
 
     log_path = f"logs/{name}.log"
     log_file = open(log_path, "a")
@@ -95,11 +98,15 @@ def deploy_app(name, file):
 
     save_db(apps)
 
-    return f"🚀 DEPLOYED {name} (PID {process.pid})"
+    return f"""🚀 DEPLOYED
+
+Name: {name}
+PID: {process.pid}
+Status: running"""
 
 def stop_app(name):
     if name not in apps:
-        return "❌ Not found"
+        return "❌ App not found"
 
     try:
         os.kill(apps[name]["pid"], 9)
@@ -107,7 +114,7 @@ def stop_app(name):
         save_db(apps)
         return f"🛑 {name} stopped"
     except:
-        return "❌ Failed"
+        return "❌ Failed to stop"
 
 def list_apps():
     if not apps:
@@ -116,31 +123,31 @@ def list_apps():
     text = "📦 LUVY STACK APPS\n\n"
 
     for k, v in apps.items():
-        text += f"{k} → {v['status']}\n"
+        text += f"• {k} → {v['status']}\n"
 
     return text
 
 def get_logs(name):
     if name not in apps:
-        return "❌ Not found"
+        return "❌ App not found"
 
     path = apps[name]["log"]
 
     if not os.path.exists(path):
-        return "No logs"
+        return "No logs yet"
 
     with open(path, "r") as f:
         return f.read()[-3000:]
 
 # =========================
-# START MESSAGE
+# START
 # =========================
-print("⚡ LUVY STACK ONLINE")
+print("⚡ LUVY STACK ENGINE ONLINE")
 
 MENU = """⚡ LUVY STACK ENGINE
 
 Commands:
-• /upload (send .py file)
+• /upload
 • /deploy name file.py
 • /apps
 • /logs name
@@ -184,21 +191,32 @@ while True:
             # =========================
             elif text == "/upload":
                 upload_mode = True
-                send(chat_id, "📤 Send your .py file now")
+                send(chat_id, "📤 Send your .py file as DOCUMENT")
 
             elif upload_mode and "document" in msg:
                 file_id = msg["document"]["file_id"]
                 file_name = msg["document"]["file_name"]
 
-                code = get_file(file_id)
+                if not file_name.endswith(".py"):
+                    upload_mode = False
+                    send(chat_id, "❌ Only .py files allowed")
+                    continue
+
+                code = download_file(file_id)
+
+                if not code:
+                    upload_mode = False
+                    send(chat_id, "❌ Failed to download file")
+                    continue
 
                 path = f"deploy/{file_name}"
+
                 with open(path, "w") as f:
                     f.write(code)
 
                 upload_mode = False
 
-                send(chat_id, f"✅ Uploaded: {file_name}")
+                send(chat_id, f"✅ Uploaded: deploy/{file_name}")
 
             # =========================
             # DEPLOY
