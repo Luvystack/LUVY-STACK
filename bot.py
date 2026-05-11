@@ -36,7 +36,7 @@ def save_db(data):
 apps = load_db()
 
 # =========================
-# TELEGRAM
+# TELEGRAM HELPERS
 # =========================
 def send(chat_id, text):
     try:
@@ -54,12 +54,13 @@ def get_updates(offset=None):
         if offset:
             url += f"?offset={offset}"
 
-        return requests.get(url, timeout=10).json()
+        r = requests.get(url, timeout=10)
+        return r.json()
     except:
         return {"result": []}
 
 # =========================
-# CODE SCANNER (light safety)
+# SAFETY SCANNER
 # =========================
 def scan_code(code):
     blocked = ["rm -rf", "socket", "fork", "kill"]
@@ -76,7 +77,7 @@ def scan_code(code):
     return True, "OK"
 
 # =========================
-# ENGINE
+# ENGINE CORE
 # =========================
 def deploy_app(name, code):
     path = f"deploy/{name}.py"
@@ -122,7 +123,7 @@ def stop_app(name):
         os.kill(apps[name]["pid"], 9)
         apps[name]["status"] = "stopped"
         save_db(apps)
-        return f"🛑 Stopped {name}"
+        return f"🛑 Stopped: {name}"
     except:
         return "❌ Failed"
 
@@ -145,13 +146,12 @@ def list_apps():
     for k, v in apps.items():
         text += f"• {k} → {v['status']}\n"
 
-    text += "━━━━━━━━━━━━━━"
-    return text
+    return text + "\n━━━━━━━━━━━━━━"
 
 # =========================
 # STATE
 # =========================
-last_update_id = None
+last_update_id = 0
 pending_code = {}
 
 print("⚡ LUVY STACK ENGINE RUNNING")
@@ -159,9 +159,9 @@ print("⚡ LUVY STACK ENGINE RUNNING")
 MENU = """
 ⚡ LUVY STACK ENGINE
 
-How to use:
+Flow:
 1. /deploy name
-2. send code (after command)
+2. send code
 
 Commands:
 • /deploy name
@@ -194,66 +194,46 @@ while True:
                 send(chat_id, "❌ Access denied")
                 continue
 
-            # =====================
             # START
-            # =====================
             if text == "/start":
                 send(chat_id, MENU)
 
-            # =====================
             # DEPLOY INIT
-            # =====================
             elif text.startswith("/deploy "):
-                name = text.split(" ", 1)[1]
+                name = text.split(" ", 1)[1].strip()
                 pending_code[user_id] = name
-                send(chat_id, f"📥 Send Python code for: {name}")
+                send(chat_id, f"📥 Send code for: {name}")
 
-            # =====================
             # RECEIVE CODE
-            # =====================
             elif user_id in pending_code:
                 name = pending_code.pop(user_id)
+                send(chat_id, deploy_app(name, text))
 
-                result = deploy_app(name, text)
-                send(chat_id, result)
-
-            # =====================
             # APPS
-            # =====================
             elif text == "/apps":
                 send(chat_id, list_apps())
 
-            # =====================
             # DASHBOARD
-            # =====================
             elif text == "/dashboard":
                 send(chat_id, list_apps())
 
-            # =====================
             # LOGS
-            # =====================
             elif text.startswith("/logs"):
                 parts = text.split()
                 if len(parts) < 2:
                     send(chat_id, "Usage: /logs name")
                     continue
-
                 send(chat_id, get_logs(parts[1]))
 
-            # =====================
             # STOP
-            # =====================
             elif text.startswith("/stop"):
                 parts = text.split()
                 if len(parts) < 2:
                     send(chat_id, "Usage: /stop name")
                     continue
-
                 send(chat_id, stop_app(parts[1]))
 
-            # =====================
             # PING
-            # =====================
             elif text == "/ping":
                 send(chat_id, "pong 🟢 LUVY STACK ONLINE")
 
