@@ -58,7 +58,34 @@ def download_file(file_id):
         return None
 
 # =========================
-# UPDATES
+# CODE SCANNER (SAFETY LAYER)
+# =========================
+def scan_code(code):
+    blocked = [
+        "os.system",
+        "subprocess",
+        "shutil",
+        "socket",
+        "eval(",
+        "exec(",
+        "__import__('os')",
+        "rm -rf",
+        "open('/",
+    ]
+
+    for b in blocked:
+        if b in code:
+            return False, f"Blocked keyword detected: {b}"
+
+    try:
+        compile(code, "<string>", "exec")
+    except Exception as e:
+        return False, f"Syntax error: {str(e)}"
+
+    return True, "OK"
+
+# =========================
+# LOOP
 # =========================
 last_update_id = None
 
@@ -78,7 +105,13 @@ def deploy_app(name, file):
     path = f"deploy/{file}"
 
     if not os.path.exists(path):
-        return "❌ File not found in deploy/"
+        return "❌ File not found"
+
+    code = open(path, "r").read()
+
+    ok, msg = scan_code(code)
+    if not ok:
+        return f"❌ Cannot deploy\nReason: {msg}"
 
     log_path = f"logs/{name}.log"
     log_file = open(log_path, "a")
@@ -98,15 +131,11 @@ def deploy_app(name, file):
 
     save_db(apps)
 
-    return f"""🚀 DEPLOYED
-
-Name: {name}
-PID: {process.pid}
-Status: running"""
+    return f"🚀 DEPLOYED {name} (PID {process.pid})"
 
 def stop_app(name):
     if name not in apps:
-        return "❌ App not found"
+        return "❌ Not found"
 
     try:
         os.kill(apps[name]["pid"], 9)
@@ -114,30 +143,21 @@ def stop_app(name):
         save_db(apps)
         return f"🛑 {name} stopped"
     except:
-        return "❌ Failed to stop"
+        return "❌ Failed"
 
 def list_apps():
     if not apps:
         return "No apps running"
 
-    text = "📦 LUVY STACK APPS\n\n"
+    text = "📦 LUVY STACK ENGINE\n\n"
 
     for k, v in apps.items():
         text += f"• {k} → {v['status']}\n"
 
     return text
 
-def get_logs(name):
-    if name not in apps:
-        return "❌ App not found"
-
-    path = apps[name]["log"]
-
-    if not os.path.exists(path):
-        return "No logs yet"
-
-    with open(path, "r") as f:
-        return f.read()[-3000:]
+def dashboard():
+    return list_apps()
 
 # =========================
 # START
@@ -149,8 +169,9 @@ MENU = """⚡ LUVY STACK ENGINE
 Commands:
 • /upload
 • /deploy name file.py
-• /apps
-• /logs name
+• /runbg name file.py
+• /delete name
+• /dashboard
 • /stop name
 • /ping
 """
@@ -175,7 +196,6 @@ while True:
             user_id = msg["from"]["id"]
             text = msg.get("text", "")
 
-            # ADMIN ONLY
             if user_id != ADMIN_ID:
                 send(chat_id, "❌ Access denied")
                 continue
@@ -209,21 +229,26 @@ while True:
                     send(chat_id, "❌ Failed to download file")
                     continue
 
+                ok, reason = scan_code(code)
+
+                if not ok:
+                    upload_mode = False
+                    send(chat_id, f"❌ Code blocked\nReason: {reason}")
+                    continue
+
                 path = f"deploy/{file_name}"
 
                 with open(path, "w") as f:
                     f.write(code)
 
                 upload_mode = False
-
-                send(chat_id, f"✅ Uploaded: deploy/{file_name}")
+                send(chat_id, f"✅ Uploaded & Safe: {file_name}")
 
             # =========================
             # DEPLOY
             # =========================
             elif text.startswith("/deploy"):
                 parts = text.split()
-
                 if len(parts) < 3:
                     send(chat_id, "Usage: /deploy name file.py")
                     continue
@@ -237,25 +262,40 @@ while True:
                 send(chat_id, list_apps())
 
             # =========================
-            # LOGS
+            # DASHBOARD
             # =========================
-            elif text.startswith("/logs"):
-                parts = text.split()
-
-                if len(parts) < 2:
-                    send(chat_id, "Usage: /logs name")
-                    continue
-
-                send(chat_id, get_logs(parts[1]))
+            elif text == "/dashboard":
+                send(chat_id, dashboard())
 
             # =========================
-            # STOP
+            # STOP (simple delete)
             # =========================
             elif text.startswith("/stop"):
                 parts = text.split()
-
                 if len(parts) < 2:
                     send(chat_id, "Usage: /stop name")
+                    continue
+
+                send(chat_id, stop_app(parts[1]))
+
+            # =========================
+            # RUNBG (alias deploy)
+            # =========================
+            elif text.startswith("/runbg"):
+                parts = text.split()
+                if len(parts) < 3:
+                    send(chat_id, "Usage: /runbg name file.py")
+                    continue
+
+                send(chat_id, deploy_app(parts[1], parts[2]))
+
+            # =========================
+            # DELETE (stop only)
+            # =========================
+            elif text.startswith("/delete"):
+                parts = text.split()
+                if len(parts) < 2:
+                    send(chat_id, "Usage: /delete name")
                     continue
 
                 send(chat_id, stop_app(parts[1]))
