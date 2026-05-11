@@ -8,7 +8,7 @@ import subprocess
 # CONFIG
 # =========================
 TOKEN = "8738323399:AAEisCBZay6ChA7ghLCfbyt7syG_KxT2AGw"
-ADMIN_ID = 123456789  # replace with your Telegram ID
+ADMIN_ID = 7939923484  # replace with your Telegram ID
 
 BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
 
