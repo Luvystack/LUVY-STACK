@@ -8,7 +8,7 @@ import subprocess
 # CONFIG
 # =========================
 TOKEN = "8738323399:AAEisCBZay6ChA7ghLCfbyt7syG_KxT2AGw"
-ADMIN_ID = 7939923484  # replace with your Telegram ID
+ADMIN_ID = 7939923484
 
 BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
 
@@ -19,7 +19,7 @@ os.makedirs("logs", exist_ok=True)
 os.makedirs("storage", exist_ok=True)
 
 # =========================
-# DATABASE
+# DB
 # =========================
 def load_db():
     if not os.path.exists(DB_FILE):
@@ -37,7 +37,7 @@ def save_db(data):
 apps = load_db()
 
 # =========================
-# TELEGRAM SEND
+# TELEGRAM
 # =========================
 def send(chat_id, text):
     try:
@@ -48,9 +48,6 @@ def send(chat_id, text):
     except:
         pass
 
-# =========================
-# GET UPDATES
-# =========================
 last_update_id = None
 
 def get_updates():
@@ -63,31 +60,91 @@ def get_updates():
     return requests.get(url).json()
 
 # =========================
-# DEPLOY SYSTEM
+# ENGINE CORE
 # =========================
 def deploy_app(name, file):
     path = f"deploy/{file}"
 
     if not os.path.exists(path):
-        return "❌ File not found"
+        return "❌ File not found in deploy/"
 
-    process = subprocess.Popen(["python3", path])
+    log_path = f"logs/{name}.log"
+
+    log_file = open(log_path, "a")
+
+    process = subprocess.Popen(
+        ["python3", path],
+        stdout=log_file,
+        stderr=log_file
+    )
 
     apps[name] = {
         "file": file,
         "pid": process.pid,
+        "log": log_path,
         "status": "running"
     }
 
     save_db(apps)
 
-    return f"🚀 Deployed {name} (PID {process.pid})"
+    return f"""🚀 DEPLOYED
+
+Name: {name}
+PID: {process.pid}
+Status: running"""
+
+def stop_app(name):
+    if name not in apps:
+        return "❌ App not found"
+
+    try:
+        os.kill(apps[name]["pid"], 9)
+        apps[name]["status"] = "stopped"
+        save_db(apps)
+        return f"🛑 {name} stopped"
+    except:
+        return "❌ Failed to stop"
+
+def list_apps():
+    if not apps:
+        return "No running apps"
+
+    text = "📦 LUVY STACK APPS\n\n"
+
+    for k, v in apps.items():
+        text += f"• {k}\n  PID: {v['pid']}\n  Status: {v['status']}\n\n"
+
+    return text
+
+def get_logs(name):
+    if name not in apps:
+        return "❌ App not found"
+
+    path = apps[name]["log"]
+
+    if not os.path.exists(path):
+        return "No logs yet"
+
+    with open(path, "r") as f:
+        return f.read()[-3000:]
 
 # =========================
-# MAIN ENGINE
+# STARTUP
 # =========================
-print("🟢 LUVY STACK RUNNING")
+print("⚡ LUVY STACK ENGINE ONLINE")
 
+boot_msg = """
+⚡ LUVY STACK Runtime Engine
+━━━━━━━━━━━━━━━━━━━━━━
+Status: ONLINE 🟢
+Engine: ACTIVE ⚙️
+Deploy: READY 🚀
+Logs: ENABLED 📊
+"""
+
+# =========================
+# LOOP
+# =========================
 while True:
     try:
         data = get_updates()
@@ -95,20 +152,21 @@ while True:
         for update in data.get("result", []):
             last_update_id = update["update_id"]
 
-            if "message" not in update:
+            msg = update.get("message")
+            if not msg:
                 continue
 
-            msg = update["message"]
             chat_id = msg["chat"]["id"]
             user_id = msg["from"]["id"]
             text = msg.get("text", "")
 
-            # ADMIN ONLY
             if user_id != ADMIN_ID:
                 send(chat_id, "❌ Access denied")
                 continue
 
-            # COMMANDS
+            # =========================
+            # DEPLOY
+            # =========================
             if text.startswith("/deploy"):
                 parts = text.split()
 
@@ -116,22 +174,60 @@ while True:
                     send(chat_id, "Usage: /deploy name file.py")
                     continue
 
-                name = parts[1]
-                file = parts[2]
+                send(chat_id, deploy_app(parts[1], parts[2]))
 
-                result = deploy_app(name, file)
-                send(chat_id, result)
-
+            # =========================
+            # APPS
+            # =========================
             elif text == "/apps":
-                send(chat_id, str(apps))
+                send(chat_id, list_apps())
 
+            # =========================
+            # LOGS
+            # =========================
+            elif text.startswith("/logs"):
+                parts = text.split()
+
+                if len(parts) < 2:
+                    send(chat_id, "Usage: /logs name")
+                    continue
+
+                send(chat_id, get_logs(parts[1]))
+
+            # =========================
+            # STOP
+            # =========================
+            elif text.startswith("/stop"):
+                parts = text.split()
+
+                if len(parts) < 2:
+                    send(chat_id, "Usage: /stop name")
+                    continue
+
+                send(chat_id, stop_app(parts[1]))
+
+            # =========================
+            # PING
+            # =========================
             elif text == "/ping":
-                send(chat_id, "pong 🟢")
+                send(chat_id, "pong 🟢 LUVY STACK ACTIVE")
 
+            # =========================
+            # HELP (LEGENDARY LOOK)
+            # =========================
             else:
-                send(chat_id, "Commands: /deploy /apps /ping")
+                send(chat_id,
+"""⚡ LUVY STACK ENGINE
+
+Commands:
+• /deploy name file.py
+• /apps
+• /logs name
+• /stop name
+• /ping
+""")
 
     except Exception as e:
-        print("Error:", e)
+        print("error:", e)
 
     time.sleep(2)
