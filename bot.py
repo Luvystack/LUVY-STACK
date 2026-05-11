@@ -26,7 +26,7 @@ os.makedirs("logs", exist_ok=True)
 os.makedirs("storage", exist_ok=True)
 
 # =========================
-# ENGINE STATE
+# STATE
 # =========================
 ENGINE_LOCKED = True
 ENGINE_PASSWORD = "LUVY-SECURE-ACCESS"
@@ -62,21 +62,17 @@ load_db()
 # =========================
 def send(chat_id, text):
     try:
-        requests.post(
-            BASE_URL + "/sendMessage",
-            data={"chat_id": chat_id, "text": text},
-            timeout=10
-        )
+        requests.post(BASE_URL + "/sendMessage",
+                      data={"chat_id": chat_id, "text": text},
+                      timeout=10)
     except:
         pass
 
 def manager_send(text):
     try:
-        requests.post(
-            MANAGER_URL + "/sendMessage",
-            data={"chat_id": MANAGER_CHAT_ID, "text": text},
-            timeout=10
-        )
+        requests.post(MANAGER_URL + "/sendMessage",
+                      data={"chat_id": MANAGER_CHAT_ID, "text": text},
+                      timeout=10)
     except:
         pass
 
@@ -90,7 +86,7 @@ def get_updates(offset=None):
         return {"result": []}
 
 # =========================
-# TOKEN SYSTEM (10 MIN)
+# TOKEN SYSTEM (ONLY MANAGER)
 # =========================
 def generate_token():
     return ''.join(random.choices(string.ascii_letters + string.digits, k=12))
@@ -100,14 +96,11 @@ def rotate_token():
 
     now = time.time()
     if CURRENT_TOKEN is None or now - LAST_TOKEN_TIME >= 600:
-
         CURRENT_TOKEN = generate_token()
         LAST_TOKEN_TIME = now
 
         msg = f"🔐 NEW DEPLOY TOKEN:\n{CURRENT_TOKEN}"
-
-        send(ADMIN_ID, msg)
-        manager_send(msg)
+        manager_send(msg)   # ONLY manager gets it
 
 # =========================
 # SAFETY SCANNER
@@ -161,7 +154,7 @@ def deploy_app(name, code):
     return f"🚀 DEPLOYED: {name}"
 
 # =========================
-# STOP APP
+# STOP
 # =========================
 def stop_app(name):
     if name not in apps:
@@ -176,19 +169,6 @@ def stop_app(name):
         return "❌ Failed"
 
 # =========================
-# LOGS
-# =========================
-def get_logs(name):
-    if name not in apps:
-        return "❌ Not found"
-
-    try:
-        with open(apps[name]["log"], "r") as f:
-            return f.read()[-3000:]
-    except:
-        return "No logs"
-
-# =========================
 # DASHBOARD
 # =========================
 def dashboard():
@@ -198,7 +178,6 @@ def dashboard():
     text = "📦 LUVY STACK DASHBOARD\n━━━━━━━━━━━━━━\n"
     for k, v in apps.items():
         text += f"• {k} → {v['status']}\n"
-
     return text
 
 # =========================
@@ -206,16 +185,22 @@ def dashboard():
 # =========================
 def unlock(password):
     global ENGINE_LOCKED
-
     if password == ENGINE_PASSWORD:
         ENGINE_LOCKED = False
-        return "🔓 Engine Unlocked"
+        return "🔓 Unlocked"
     return "❌ Wrong password"
+
+# =========================
+# UI STATE
+# =========================
+def start_screen():
+    status = "🔒 LOCKED" if ENGINE_LOCKED else "🟢 ACTIVE"
+    return f"LUVY STACK ENGINE\nSTATUS: {status}"
 
 # =========================
 # LOOP
 # =========================
-print("⚡ LUVY STACK ENGINE RUNNING")
+print("LUVY STACK ENGINE RUNNING")
 
 while True:
     try:
@@ -235,26 +220,29 @@ while True:
             text = msg.get("text", "")
 
             if user_id != ADMIN_ID:
-                send(chat_id, "❌ Access denied")
                 continue
 
-            # LOCK GATE
-            if ENGINE_LOCKED and text not in ["/start", "/unlock"]:
-                send(chat_id, "🔒 Engine locked")
-                continue
-
-            # START
+            # START (ONLY STATUS)
             if text == "/start":
-                send(chat_id, "⚡ LUVY STACK ONLINE")
+                send(chat_id, start_screen())
+                continue
 
-            elif text.startswith("/unlock"):
+            # UNLOCK
+            if text.startswith("/unlock"):
                 parts = text.split()
                 if len(parts) < 2:
                     send(chat_id, "Usage: /unlock password")
                     continue
                 send(chat_id, unlock(parts[1]))
+                continue
 
-            elif text.startswith("/deploy "):
+            # BLOCK EVERYTHING WHEN LOCKED
+            if ENGINE_LOCKED:
+                send(chat_id, "🔒 SYSTEM LOCKED")
+                continue
+
+            # DEPLOY
+            if text.startswith("/deploy "):
                 name = text.split(" ", 1)[1]
                 pending_code[user_id] = name
                 send(chat_id, f"📥 Send code for: {name}")
@@ -264,7 +252,7 @@ while True:
 
                 parts = text.split("\n", 1)
                 if len(parts) < 2:
-                    send(chat_id, "❌ Format: TOKEN + CODE")
+                    send(chat_id, "❌ Send TOKEN + CODE")
                     continue
 
                 token = parts[0].strip()
@@ -279,19 +267,9 @@ while True:
             elif text == "/dashboard":
                 send(chat_id, dashboard())
 
-            elif text.startswith("/logs"):
-                parts = text.split()
-                send(chat_id, get_logs(parts[1]) if len(parts) > 1 else "Usage: /logs name")
-
             elif text.startswith("/stop"):
                 parts = text.split()
                 send(chat_id, stop_app(parts[1]) if len(parts) > 1 else "Usage: /stop name")
-
-            elif text == "/apps":
-                send(chat_id, dashboard())
-
-            elif text == "/ping":
-                send(chat_id, "pong 🟢")
 
     except Exception as e:
         print("error:", e)
