@@ -4,8 +4,6 @@ import time
 import requests
 import subprocess
 import signal
-import random
-import string
 
 # =========================
 # CONFIG
@@ -13,12 +11,7 @@ import string
 TOKEN = "8738323399:AAEisCBZay6ChA7ghLCfbyt7syG_KxT2AGw"
 ADMIN_ID = 7939923484
 
-MANAGER_BOT_TOKEN = "YOUR_MANAGER_BOT_TOKEN"
-MANAGER_CHAT_ID = "@lsxmanagerbot"
-
 BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
-MANAGER_URL = f"https://api.telegram.org/bot{MANAGER_BOT_TOKEN}"
-
 DB_FILE = "storage/apps.json"
 
 os.makedirs("deploy", exist_ok=True)
@@ -26,53 +19,33 @@ os.makedirs("logs", exist_ok=True)
 os.makedirs("storage", exist_ok=True)
 
 # =========================
-# STATE
-# =========================
-ENGINE_LOCKED = True
-ENGINE_PASSWORD = "LUVY-SECURE-ACCESS"
-
-CURRENT_TOKEN = None
-LAST_TOKEN_TIME = 0
-
-last_update_id = 0
-pending_code = {}
-
-apps = {}
-
-# =========================
 # DB
 # =========================
 def load_db():
-    global apps
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r") as f:
-                apps = json.load(f)
-        except:
-            apps = {}
+    if not os.path.exists(DB_FILE):
+        return {}
+    try:
+        with open(DB_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {}
 
-def save_db():
+def save_db(data):
     with open(DB_FILE, "w") as f:
-        json.dump(apps, f, indent=2)
+        json.dump(data, f, indent=2)
 
-load_db()
+apps = load_db()
 
 # =========================
 # TELEGRAM HELPERS
 # =========================
 def send(chat_id, text):
     try:
-        requests.post(BASE_URL + "/sendMessage",
-                      data={"chat_id": chat_id, "text": text},
-                      timeout=10)
-    except:
-        pass
-
-def manager_send(text):
-    try:
-        requests.post(MANAGER_URL + "/sendMessage",
-                      data={"chat_id": MANAGER_CHAT_ID, "text": text},
-                      timeout=10)
+        requests.post(
+            BASE_URL + "/sendMessage",
+            data={"chat_id": chat_id, "text": text},
+            timeout=10
+        )
     except:
         pass
 
@@ -86,24 +59,7 @@ def get_updates(offset=None):
         return {"result": []}
 
 # =========================
-# TOKEN SYSTEM (ONLY MANAGER)
-# =========================
-def generate_token():
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=12))
-
-def rotate_token():
-    global CURRENT_TOKEN, LAST_TOKEN_TIME
-
-    now = time.time()
-    if CURRENT_TOKEN is None or now - LAST_TOKEN_TIME >= 600:
-        CURRENT_TOKEN = generate_token()
-        LAST_TOKEN_TIME = now
-
-        msg = f"🔐 NEW DEPLOY TOKEN:\n{CURRENT_TOKEN}"
-        manager_send(msg)   # ONLY manager gets it
-
-# =========================
-# SAFETY SCANNER
+# SAFETY SCANNER (light)
 # =========================
 def scan_code(code):
     blocked = ["rm -rf", "socket", "fork", "kill"]
@@ -120,7 +76,7 @@ def scan_code(code):
     return True, "OK"
 
 # =========================
-# DEPLOY ENGINE
+# ENGINE CORE
 # =========================
 def deploy_app(name, code):
     path = f"deploy/{name}.py"
@@ -128,19 +84,26 @@ def deploy_app(name, code):
 
     ok, reason = scan_code(code)
     if not ok:
-        return f"❌ BLOCKED\n{reason}"
+        return f"❌ Code blocked\n{reason}"
 
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(code)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(code)
+    except:
+        return "❌ Failed to save code"
 
-    log_file = open(log_path, "a")
+    try:
+        log_file = open(log_path, "a")
 
-    process = subprocess.Popen(
-        ["python3", path],
-        stdout=log_file,
-        stderr=log_file,
-        preexec_fn=os.setsid
-    )
+        process = subprocess.Popen(
+            ["python3", path],
+            stdout=log_file,
+            stderr=log_file,
+            preexec_fn=os.setsid
+        )
+
+    except Exception as e:
+        return f"❌ Deploy failed: {e}"
 
     apps[name] = {
         "file": path,
@@ -149,12 +112,12 @@ def deploy_app(name, code):
         "status": "running"
     }
 
-    save_db()
+    save_db(apps)
 
     return f"🚀 DEPLOYED: {name}"
 
 # =========================
-# STOP
+# STOP APP
 # =========================
 def stop_app(name):
     if name not in apps:
@@ -163,49 +126,64 @@ def stop_app(name):
     try:
         os.killpg(os.getpgid(apps[name]["pid"]), signal.SIGTERM)
         apps[name]["status"] = "stopped"
-        save_db()
+        save_db(apps)
         return f"🛑 Stopped: {name}"
     except:
         return "❌ Failed"
 
 # =========================
-# DASHBOARD
+# LOGS
 # =========================
-def dashboard():
+def get_logs(name):
+    if name not in apps:
+        return "❌ App not found"
+
+    try:
+        with open(apps[name]["log"], "r") as f:
+            return f.read()[-3000:]
+    except:
+        return "No logs yet"
+
+# =========================
+# LIST APPS
+# =========================
+def list_apps():
     if not apps:
-        return "No apps"
+        return "No apps running"
 
     text = "📦 LUVY STACK DASHBOARD\n━━━━━━━━━━━━━━\n"
+
     for k, v in apps.items():
         text += f"• {k} → {v['status']}\n"
+
     return text
 
 # =========================
-# LOCK CONTROL
+# STATE
 # =========================
-def unlock(password):
-    global ENGINE_LOCKED
-    if password == ENGINE_PASSWORD:
-        ENGINE_LOCKED = False
-        return "🔓 Unlocked"
-    return "❌ Wrong password"
+last_update_id = 0
+pending_code = {}
+
+print("⚡ LUVY STACK RUNTIME ENGINE RUNNING")
+
+MENU = """
+⚡ LUVY STACK ENGINE
+
+Commands:
+• /upload (optional)
+• /deploy name
+• /apps
+• /logs name
+• /stop name
+• /dashboard
+• /ping
+"""
 
 # =========================
-# UI STATE
+# MAIN LOOP
 # =========================
-def start_screen():
-    status = "🔒 LOCKED" if ENGINE_LOCKED else "🟢 ACTIVE"
-    return f"LUVY STACK ENGINE\nSTATUS: {status}"
-
-# =========================
-# LOOP
-# =========================
-print("LUVY STACK ENGINE RUNNING")
-
 while True:
     try:
-        rotate_token()
-
         updates = get_updates(last_update_id)
 
         for update in updates.get("result", []):
@@ -220,56 +198,66 @@ while True:
             text = msg.get("text", "")
 
             if user_id != ADMIN_ID:
+                send(chat_id, "❌ Access denied")
                 continue
 
-            # START (ONLY STATUS)
+            # START
             if text == "/start":
-                send(chat_id, start_screen())
-                continue
+                send(chat_id, MENU)
 
-            # UNLOCK
-            if text.startswith("/unlock"):
-                parts = text.split()
-                if len(parts) < 2:
-                    send(chat_id, "Usage: /unlock password")
-                    continue
-                send(chat_id, unlock(parts[1]))
-                continue
-
-            # BLOCK EVERYTHING WHEN LOCKED
-            if ENGINE_LOCKED:
-                send(chat_id, "🔒 SYSTEM LOCKED")
-                continue
-
-            # DEPLOY
-            if text.startswith("/deploy "):
-                name = text.split(" ", 1)[1]
+            # DEPLOY FLOW
+            elif text.startswith("/deploy "):
+                name = text.split(" ", 1)[1].strip()
                 pending_code[user_id] = name
                 send(chat_id, f"📥 Send code for: {name}")
 
             elif user_id in pending_code:
                 name = pending_code.pop(user_id)
+                send(chat_id, deploy_app(name, text))
 
-                parts = text.split("\n", 1)
-                if len(parts) < 2:
-                    send(chat_id, "❌ Send TOKEN + CODE")
-                    continue
+            # OPTIONAL FILE UPLOAD (simple storage only)
+            elif text == "/upload":
+                send(chat_id, "📤 Send .py file")
 
-                token = parts[0].strip()
-                code = parts[1]
+            elif "document" in msg:
+                file_id = msg["document"]["file_id"]
+                file_name = msg["document"]["file_name"]
 
-                if token != CURRENT_TOKEN:
-                    send(chat_id, "❌ Invalid token")
-                    continue
+                r = requests.get(BASE_URL + f"/getFile?file_id={file_id}").json()
+                file_path = r["result"]["file_path"]
+                file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+                code = requests.get(file_url).text
 
-                send(chat_id, deploy_app(name, code))
+                path = f"deploy/{file_name}"
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(code)
 
+                send(chat_id, f"✅ Uploaded: {file_name}")
+
+            # APPS
+            elif text == "/apps":
+                send(chat_id, list_apps())
+
+            # DASHBOARD
             elif text == "/dashboard":
-                send(chat_id, dashboard())
+                send(chat_id, list_apps())
 
+            # LOGS
+            elif text.startswith("/logs"):
+                parts = text.split()
+                send(chat_id, get_logs(parts[1]) if len(parts) > 1 else "Usage: /logs name")
+
+            # STOP
             elif text.startswith("/stop"):
                 parts = text.split()
                 send(chat_id, stop_app(parts[1]) if len(parts) > 1 else "Usage: /stop name")
+
+            # PING
+            elif text == "/ping":
+                send(chat_id, "pong 🟢 LUVY STACK ONLINE")
+
+            else:
+                send(chat_id, MENU)
 
     except Exception as e:
         print("error:", e)
