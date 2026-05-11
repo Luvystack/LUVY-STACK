@@ -58,7 +58,7 @@ def download_file(file_id):
         return None
 
 # =========================
-# CODE SCANNER (SAFETY LAYER)
+# CODE SCANNER
 # =========================
 def scan_code(code):
     blocked = [
@@ -71,11 +71,13 @@ def scan_code(code):
         "__import__('os')",
         "rm -rf",
         "open('/",
+        "fork",
+        "kill"
     ]
 
     for b in blocked:
         if b in code:
-            return False, f"Blocked keyword detected: {b}"
+            return False, f"Blocked keyword: {b}"
 
     try:
         compile(code, "<string>", "exec")
@@ -85,7 +87,7 @@ def scan_code(code):
     return True, "OK"
 
 # =========================
-# LOOP
+# LOOP CONTROL
 # =========================
 last_update_id = None
 
@@ -105,9 +107,9 @@ def deploy_app(name, file):
     path = f"deploy/{file}"
 
     if not os.path.exists(path):
-        return "❌ File not found"
+        return f"❌ File not found: deploy/{file}"
 
-    code = open(path, "r").read()
+    code = open(path, "r", encoding="utf-8").read()
 
     ok, msg = scan_code(code)
     if not ok:
@@ -135,7 +137,7 @@ def deploy_app(name, file):
 
 def stop_app(name):
     if name not in apps:
-        return "❌ Not found"
+        return "❌ App not found"
 
     try:
         os.kill(apps[name]["pid"], 9)
@@ -143,7 +145,7 @@ def stop_app(name):
         save_db(apps)
         return f"🛑 {name} stopped"
     except:
-        return "❌ Failed"
+        return "❌ Failed to stop"
 
 def list_apps():
     if not apps:
@@ -156,9 +158,6 @@ def list_apps():
 
     return text
 
-def dashboard():
-    return list_apps()
-
 # =========================
 # START
 # =========================
@@ -169,8 +168,7 @@ MENU = """⚡ LUVY STACK ENGINE
 Commands:
 • /upload
 • /deploy name file.py
-• /runbg name file.py
-• /delete name
+• /apps
 • /dashboard
 • /stop name
 • /ping
@@ -207,15 +205,18 @@ while True:
                 send(chat_id, MENU)
 
             # =========================
-            # UPLOAD MODE
+            # UPLOAD START
             # =========================
             elif text == "/upload":
                 upload_mode = True
-                send(chat_id, "📤 Send your .py file as DOCUMENT")
+                send(chat_id, "📤 Send .py file as DOCUMENT")
 
+            # =========================
+            # FILE RECEIVE
+            # =========================
             elif upload_mode and "document" in msg:
                 file_id = msg["document"]["file_id"]
-                file_name = msg["document"]["file_name"]
+                file_name = msg["document"]["file_name"].lower().replace(" ", "_")
 
                 if not file_name.endswith(".py"):
                     upload_mode = False
@@ -226,7 +227,7 @@ while True:
 
                 if not code:
                     upload_mode = False
-                    send(chat_id, "❌ Failed to download file")
+                    send(chat_id, "❌ Download failed")
                     continue
 
                 ok, reason = scan_code(code)
@@ -238,11 +239,11 @@ while True:
 
                 path = f"deploy/{file_name}"
 
-                with open(path, "w") as f:
+                with open(path, "w", encoding="utf-8") as f:
                     f.write(code)
 
                 upload_mode = False
-                send(chat_id, f"✅ Uploaded & Safe: {file_name}")
+                send(chat_id, f"✅ Uploaded: {file_name}")
 
             # =========================
             # DEPLOY
@@ -265,10 +266,10 @@ while True:
             # DASHBOARD
             # =========================
             elif text == "/dashboard":
-                send(chat_id, dashboard())
+                send(chat_id, list_apps())
 
             # =========================
-            # STOP (simple delete)
+            # STOP
             # =========================
             elif text.startswith("/stop"):
                 parts = text.split()
@@ -279,36 +280,11 @@ while True:
                 send(chat_id, stop_app(parts[1]))
 
             # =========================
-            # RUNBG (alias deploy)
-            # =========================
-            elif text.startswith("/runbg"):
-                parts = text.split()
-                if len(parts) < 3:
-                    send(chat_id, "Usage: /runbg name file.py")
-                    continue
-
-                send(chat_id, deploy_app(parts[1], parts[2]))
-
-            # =========================
-            # DELETE (stop only)
-            # =========================
-            elif text.startswith("/delete"):
-                parts = text.split()
-                if len(parts) < 2:
-                    send(chat_id, "Usage: /delete name")
-                    continue
-
-                send(chat_id, stop_app(parts[1]))
-
-            # =========================
             # PING
             # =========================
             elif text == "/ping":
                 send(chat_id, "pong 🟢 LUVY STACK ONLINE")
 
-            # =========================
-            # DEFAULT
-            # =========================
             else:
                 send(chat_id, MENU)
 
