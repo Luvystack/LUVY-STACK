@@ -19,7 +19,7 @@ os.makedirs("logs", exist_ok=True)
 os.makedirs("storage", exist_ok=True)
 
 # =========================
-# DATABASE
+# DB
 # =========================
 def load_db():
     if not os.path.exists(DB_FILE):
@@ -37,7 +37,7 @@ def save_db(data):
 apps = load_db()
 
 # =========================
-# TELEGRAM
+# TELEGRAM HELPERS
 # =========================
 def send(chat_id, text):
     try:
@@ -48,6 +48,15 @@ def send(chat_id, text):
     except:
         pass
 
+def get_file(file_id):
+    r = requests.get(BASE_URL + f"/getFile?file_id={file_id}").json()
+    file_path = r["result"]["file_path"]
+    file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+    return requests.get(file_url).text
+
+# =========================
+# LOOP CONTROL
+# =========================
 last_update_id = None
 
 def get_updates():
@@ -66,10 +75,9 @@ def deploy_app(name, file):
     path = f"deploy/{file}"
 
     if not os.path.exists(path):
-        return "❌ File not found in deploy/"
+        return "❌ File not found"
 
     log_path = f"logs/{name}.log"
-
     log_file = open(log_path, "a")
 
     process = subprocess.Popen(
@@ -87,14 +95,11 @@ def deploy_app(name, file):
 
     save_db(apps)
 
-    return f"""🚀 DEPLOYED
-Name: {name}
-PID: {process.pid}
-Status: running"""
+    return f"🚀 DEPLOYED {name} (PID {process.pid})"
 
 def stop_app(name):
     if name not in apps:
-        return "❌ App not found"
+        return "❌ Not found"
 
     try:
         os.kill(apps[name]["pid"], 9)
@@ -102,39 +107,40 @@ def stop_app(name):
         save_db(apps)
         return f"🛑 {name} stopped"
     except:
-        return "❌ Failed to stop process"
+        return "❌ Failed"
 
 def list_apps():
     if not apps:
-        return "No running apps"
+        return "No apps running"
 
     text = "📦 LUVY STACK APPS\n\n"
 
     for k, v in apps.items():
-        text += f"• {k}\n  PID: {v['pid']}\n  Status: {v['status']}\n\n"
+        text += f"{k} → {v['status']}\n"
 
     return text
 
 def get_logs(name):
     if name not in apps:
-        return "❌ App not found"
+        return "❌ Not found"
 
     path = apps[name]["log"]
 
     if not os.path.exists(path):
-        return "No logs yet"
+        return "No logs"
 
     with open(path, "r") as f:
         return f.read()[-3000:]
 
 # =========================
-# STARTUP MESSAGE
+# START MESSAGE
 # =========================
-print("⚡ LUVY STACK ENGINE ONLINE")
+print("⚡ LUVY STACK ONLINE")
 
 MENU = """⚡ LUVY STACK ENGINE
 
 Commands:
+• /upload (send .py file)
 • /deploy name file.py
 • /apps
 • /logs name
@@ -145,6 +151,8 @@ Commands:
 # =========================
 # MAIN LOOP
 # =========================
+upload_mode = False
+
 while True:
     try:
         data = get_updates()
@@ -160,7 +168,7 @@ while True:
             user_id = msg["from"]["id"]
             text = msg.get("text", "")
 
-            # ONLY ADMIN
+            # ADMIN ONLY
             if user_id != ADMIN_ID:
                 send(chat_id, "❌ Access denied")
                 continue
@@ -170,6 +178,27 @@ while True:
             # =========================
             if text == "/start":
                 send(chat_id, MENU)
+
+            # =========================
+            # UPLOAD MODE
+            # =========================
+            elif text == "/upload":
+                upload_mode = True
+                send(chat_id, "📤 Send your .py file now")
+
+            elif upload_mode and "document" in msg:
+                file_id = msg["document"]["file_id"]
+                file_name = msg["document"]["file_name"]
+
+                code = get_file(file_id)
+
+                path = f"deploy/{file_name}"
+                with open(path, "w") as f:
+                    f.write(code)
+
+                upload_mode = False
+
+                send(chat_id, f"✅ Uploaded: {file_name}")
 
             # =========================
             # DEPLOY
