@@ -36,7 +36,7 @@ def save_db(data):
 apps = load_db()
 
 # =========================
-# TELEGRAM HELPERS
+# TELEGRAM
 # =========================
 def send(chat_id, text):
     try:
@@ -48,35 +48,21 @@ def send(chat_id, text):
     except:
         pass
 
-def download_file(file_id):
+def get_updates(offset=None):
     try:
-        r = requests.get(
-            BASE_URL + f"/getFile?file_id={file_id}",
-            timeout=10
-        ).json()
+        url = BASE_URL + "/getUpdates"
+        if offset:
+            url += f"?offset={offset}"
 
-        file_path = r["result"]["file_path"]
-        file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
-
-        return requests.get(file_url, timeout=10).text
+        return requests.get(url, timeout=10).json()
     except:
-        return None
+        return {"result": []}
 
 # =========================
-# CODE SCANNER
+# CODE SCANNER (light safety)
 # =========================
 def scan_code(code):
-    blocked = [
-        "os.system",
-        "subprocess",
-        "socket",
-        "eval(",
-        "exec(",
-        "__import__('os')",
-        "rm -rf",
-        "fork",
-        "kill"
-    ]
+    blocked = ["rm -rf", "socket", "fork", "kill"]
 
     for b in blocked:
         if b in code:
@@ -90,42 +76,21 @@ def scan_code(code):
     return True, "OK"
 
 # =========================
-# TELEGRAM UPDATES
+# ENGINE
 # =========================
-last_update_id = None
-
-def get_updates():
-    global last_update_id
-
-    try:
-        url = BASE_URL + "/getUpdates"
-        if last_update_id:
-            url += f"?offset={last_update_id + 1}"
-
-        return requests.get(url, timeout=10).json()
-
-    except:
-        return {"result": []}
-
-# =========================
-# ENGINE CORE
-# =========================
-def deploy_app(name, file):
-    path = f"deploy/{file}"
-
-    if not os.path.exists(path):
-        return f"❌ File not found: {file}"
-
-    try:
-        code = open(path, "r", encoding="utf-8").read()
-    except:
-        return "❌ Cannot read file"
-
-    ok, msg = scan_code(code)
-    if not ok:
-        return f"❌ Blocked\n{msg}"
-
+def deploy_app(name, code):
+    path = f"deploy/{name}.py"
     log_path = f"logs/{name}.log"
+
+    ok, reason = scan_code(code)
+    if not ok:
+        return f"❌ Code blocked\n{reason}"
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(code)
+    except:
+        return "❌ Failed to save code"
 
     try:
         log_file = open(log_path, "a")
@@ -135,12 +100,11 @@ def deploy_app(name, file):
             stdout=log_file,
             stderr=log_file
         )
-
     except Exception as e:
-        return f"❌ Runtime error: {e}"
+        return f"❌ Deploy failed: {e}"
 
     apps[name] = {
-        "file": file,
+        "file": path,
         "pid": process.pid,
         "log": log_path,
         "status": "running"
@@ -148,7 +112,7 @@ def deploy_app(name, file):
 
     save_db(apps)
 
-    return f"🚀 DEPLOYED {name}"
+    return f"🚀 DEPLOYED: {name}"
 
 def stop_app(name):
     if name not in apps:
@@ -162,43 +126,61 @@ def stop_app(name):
     except:
         return "❌ Failed"
 
+def get_logs(name):
+    if name not in apps:
+        return "❌ App not found"
+
+    try:
+        with open(apps[name]["log"], "r") as f:
+            return f.read()[-3000:]
+    except:
+        return "No logs yet"
+
 def list_apps():
     if not apps:
-        return "No apps"
+        return "No apps running"
 
-    text = "📦 LUVY STACK\n\n"
+    text = "📦 LUVY STACK DASHBOARD\n━━━━━━━━━━━━━━\n"
 
     for k, v in apps.items():
         text += f"• {k} → {v['status']}\n"
 
+    text += "━━━━━━━━━━━━━━"
     return text
 
 # =========================
-# START
+# STATE
 # =========================
-print("⚡ LUVY STACK ONLINE")
+last_update_id = None
+pending_code = {}
 
-MENU = """⚡ LUVY STACK ENGINE
+print("⚡ LUVY STACK ENGINE RUNNING")
 
-/upload
-/deploy name file.py
-/apps
-/dashboard
-/stop name
-/ping
+MENU = """
+⚡ LUVY STACK ENGINE
+
+How to use:
+1. /deploy name
+2. send code (after command)
+
+Commands:
+• /deploy name
+• /apps
+• /logs name
+• /stop name
+• /dashboard
+• /ping
 """
 
 # =========================
 # LOOP
 # =========================
-upload_mode = False
-
 while True:
     try:
-        data = get_updates()
+        updates = get_updates(last_update_id)
 
-        for update in data.get("result", []):
-            last_update_id = update["update_id"]
+        for update in updates.get("result", []):
+            last_update_id = update["update_id"] + 1
 
             msg = update.get("message")
             if not msg:
@@ -212,62 +194,55 @@ while True:
                 send(chat_id, "❌ Access denied")
                 continue
 
+            # =====================
             # START
+            # =====================
             if text == "/start":
                 send(chat_id, MENU)
 
-            # UPLOAD
-            elif text == "/upload":
-                upload_mode = True
-                send(chat_id, "📤 Send .py file")
+            # =====================
+            # DEPLOY INIT
+            # =====================
+            elif text.startswith("/deploy "):
+                name = text.split(" ", 1)[1]
+                pending_code[user_id] = name
+                send(chat_id, f"📥 Send Python code for: {name}")
 
-            # RECEIVE FILE
-            elif upload_mode and "document" in msg:
-                file_id = msg["document"]["file_id"]
-                file_name = msg["document"]["file_name"].lower().replace(" ", "_")
+            # =====================
+            # RECEIVE CODE
+            # =====================
+            elif user_id in pending_code:
+                name = pending_code.pop(user_id)
 
-                code = download_file(file_id)
+                result = deploy_app(name, text)
+                send(chat_id, result)
 
-                if not code:
-                    upload_mode = False
-                    send(chat_id, "❌ Download failed")
-                    continue
-
-                ok, reason = scan_code(code)
-
-                if not ok:
-                    upload_mode = False
-                    send(chat_id, f"❌ Blocked\n{reason}")
-                    continue
-
-                path = f"deploy/{file_name}"
-
-                try:
-                    with open(path, "w", encoding="utf-8") as f:
-                        f.write(code)
-                except:
-                    send(chat_id, "❌ Save failed")
-                    upload_mode = False
-                    continue
-
-                upload_mode = False
-                send(chat_id, f"✅ Uploaded: {file_name}")
-
-            # DEPLOY
-            elif text.startswith("/deploy"):
-                parts = text.split()
-                if len(parts) < 3:
-                    send(chat_id, "Usage: /deploy name file.py")
-                    continue
-
-                send(chat_id, deploy_app(parts[1], parts[2]))
-
+            # =====================
+            # APPS
+            # =====================
             elif text == "/apps":
                 send(chat_id, list_apps())
 
+            # =====================
+            # DASHBOARD
+            # =====================
             elif text == "/dashboard":
                 send(chat_id, list_apps())
 
+            # =====================
+            # LOGS
+            # =====================
+            elif text.startswith("/logs"):
+                parts = text.split()
+                if len(parts) < 2:
+                    send(chat_id, "Usage: /logs name")
+                    continue
+
+                send(chat_id, get_logs(parts[1]))
+
+            # =====================
+            # STOP
+            # =====================
             elif text.startswith("/stop"):
                 parts = text.split()
                 if len(parts) < 2:
@@ -276,13 +251,16 @@ while True:
 
                 send(chat_id, stop_app(parts[1]))
 
+            # =====================
+            # PING
+            # =====================
             elif text == "/ping":
-                send(chat_id, "pong 🟢")
+                send(chat_id, "pong 🟢 LUVY STACK ONLINE")
 
             else:
                 send(chat_id, MENU)
 
     except Exception as e:
-        print("Loop error:", e)
+        print("error:", e)
 
     time.sleep(2)
