@@ -19,7 +19,7 @@ os.makedirs("logs", exist_ok=True)
 os.makedirs("storage", exist_ok=True)
 
 # =========================
-# DB
+# DATABASE
 # =========================
 def load_db():
     if not os.path.exists(DB_FILE):
@@ -88,7 +88,6 @@ def deploy_app(name, file):
     save_db(apps)
 
     return f"""🚀 DEPLOYED
-
 Name: {name}
 PID: {process.pid}
 Status: running"""
@@ -103,7 +102,7 @@ def stop_app(name):
         save_db(apps)
         return f"🛑 {name} stopped"
     except:
-        return "❌ Failed to stop"
+        return "❌ Failed to stop process"
 
 def list_apps():
     if not apps:
@@ -129,21 +128,22 @@ def get_logs(name):
         return f.read()[-3000:]
 
 # =========================
-# STARTUP
+# STARTUP MESSAGE
 # =========================
 print("⚡ LUVY STACK ENGINE ONLINE")
 
-boot_msg = """
-⚡ LUVY STACK Runtime Engine
-━━━━━━━━━━━━━━━━━━━━━━
-Status: ONLINE 🟢
-Engine: ACTIVE ⚙️
-Deploy: READY 🚀
-Logs: ENABLED 📊
+MENU = """⚡ LUVY STACK ENGINE
+
+Commands:
+• /deploy name file.py
+• /apps
+• /logs name
+• /stop name
+• /ping
 """
 
 # =========================
-# LOOP
+# MAIN LOOP
 # =========================
 while True:
     try:
@@ -160,14 +160,21 @@ while True:
             user_id = msg["from"]["id"]
             text = msg.get("text", "")
 
+            # ONLY ADMIN
             if user_id != ADMIN_ID:
                 send(chat_id, "❌ Access denied")
                 continue
 
             # =========================
+            # START
+            # =========================
+            if text == "/start":
+                send(chat_id, MENU)
+
+            # =========================
             # DEPLOY
             # =========================
-            if text.startswith("/deploy"):
+            elif text.startswith("/deploy"):
                 parts = text.split()
 
                 if len(parts) < 3:
@@ -210,22 +217,13 @@ while True:
             # PING
             # =========================
             elif text == "/ping":
-                send(chat_id, "pong 🟢 LUVY STACK ACTIVE")
+                send(chat_id, "pong 🟢 LUVY STACK ONLINE")
 
             # =========================
-            # HELP (LEGENDARY LOOK)
+            # DEFAULT
             # =========================
             else:
-                send(chat_id,
-"""⚡ LUVY STACK ENGINE
-
-Commands:
-• /deploy name file.py
-• /apps
-• /logs name
-• /stop name
-• /ping
-""")
+                send(chat_id, MENU)
 
     except Exception as e:
         print("error:", e)
