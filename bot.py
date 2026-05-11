@@ -4,6 +4,8 @@ import time
 import requests
 import subprocess
 import signal
+import random
+import string
 
 # =========================
 # CONFIG
@@ -11,12 +13,51 @@ import signal
 TOKEN = "8738323399:AAEisCBZay6ChA7ghLCfbyt7syG_KxT2AGw"
 ADMIN_ID = 7939923484
 
+# LSX MANAGER BOT (username: @lsxmanagerbot)
+MANAGER_CHAT_ID = "@lsxmanagerbot"
+MANAGER_BOT_TOKEN = "8579949602:AAGT3swfTtCfcESaxz-prCBuReejrFPDLJQ"
+
 BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
+MANAGER_URL = f"https://api.telegram.org/bot{MANAGER_BOT_TOKEN}"
+
 DB_FILE = "storage/apps.json"
 
 os.makedirs("deploy", exist_ok=True)
 os.makedirs("logs", exist_ok=True)
 os.makedirs("storage", exist_ok=True)
+
+# =========================
+# SECURITY TOKEN SYSTEM
+# =========================
+CURRENT_TOKEN = None
+LAST_TOKEN_TIME = 0
+
+def generate_token():
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=12))
+
+def rotate_token():
+    global CURRENT_TOKEN, LAST_TOKEN_TIME
+
+    now = time.time()
+    if CURRENT_TOKEN is None or now - LAST_TOKEN_TIME >= 600:  # 10 minutes
+
+        CURRENT_TOKEN = generate_token()
+        LAST_TOKEN_TIME = now
+
+        msg = f"🔐 NEW DEPLOY TOKEN:\n{CURRENT_TOKEN}"
+
+        # send to admin
+        send(ADMIN_ID, msg)
+
+        # send to manager bot
+        try:
+            requests.post(
+                MANAGER_URL + "/sendMessage",
+                data={"chat_id": MANAGER_CHAT_ID, "text": msg},
+                timeout=10
+            )
+        except:
+            pass
 
 # =========================
 # DB
@@ -54,7 +95,6 @@ def get_updates(offset=None):
         url = BASE_URL + "/getUpdates"
         if offset:
             url += f"?offset={offset}"
-
         return requests.get(url, timeout=10).json()
     except:
         return {"result": []}
@@ -96,7 +136,6 @@ def deploy_app(name, code):
     try:
         log_file = open(log_path, "a")
 
-        # 🔥 ISOLATION FIX (IMPORTANT)
         process = subprocess.Popen(
             ["python3", path],
             stdout=log_file,
@@ -119,7 +158,7 @@ def deploy_app(name, code):
     return f"🚀 DEPLOYED: {name}"
 
 # =========================
-# STOP (ISOLATED SAFE KILL)
+# STOP
 # =========================
 def stop_app(name):
     if name not in apps:
@@ -127,8 +166,6 @@ def stop_app(name):
 
     try:
         pid = apps[name]["pid"]
-
-        # kill whole process group
         os.killpg(os.getpgid(pid), signal.SIGTERM)
 
         apps[name]["status"] = "stopped"
@@ -176,7 +213,7 @@ MENU = """
 
 Flow:
 1. /deploy name
-2. send code
+2. send: TOKEN + code
 
 Commands:
 • /deploy name
@@ -192,6 +229,8 @@ Commands:
 # =========================
 while True:
     try:
+        rotate_token()  # 🔥 TOKEN REFRESH SYSTEM
+
         updates = get_updates(last_update_id)
 
         for update in updates.get("result", []):
@@ -209,30 +248,38 @@ while True:
                 send(chat_id, "❌ Access denied")
                 continue
 
-            # START
             if text == "/start":
                 send(chat_id, MENU)
 
-            # DEPLOY INIT
             elif text.startswith("/deploy "):
                 name = text.split(" ", 1)[1].strip()
                 pending_code[user_id] = name
-                send(chat_id, f"📥 Send code for: {name}")
+                send(chat_id, f"📥 Send:\nTOKEN + code for {name}")
 
-            # RECEIVE CODE
             elif user_id in pending_code:
                 name = pending_code.pop(user_id)
-                send(chat_id, deploy_app(name, text))
 
-            # APPS
+                parts = text.split("\n", 1)
+
+                if len(parts) < 2:
+                    send(chat_id, "❌ Format:\nTOKEN\nCODE")
+                    continue
+
+                token = parts[0].strip()
+                code = parts[1]
+
+                if token != CURRENT_TOKEN:
+                    send(chat_id, "❌ Invalid token")
+                    continue
+
+                send(chat_id, deploy_app(name, code))
+
             elif text == "/apps":
                 send(chat_id, list_apps())
 
-            # DASHBOARD
             elif text == "/dashboard":
                 send(chat_id, list_apps())
 
-            # LOGS
             elif text.startswith("/logs"):
                 parts = text.split()
                 if len(parts) < 2:
@@ -240,7 +287,6 @@ while True:
                     continue
                 send(chat_id, get_logs(parts[1]))
 
-            # STOP
             elif text.startswith("/stop"):
                 parts = text.split()
                 if len(parts) < 2:
@@ -248,7 +294,6 @@ while True:
                     continue
                 send(chat_id, stop_app(parts[1]))
 
-            # PING
             elif text == "/ping":
                 send(chat_id, "pong 🟢 LUVY STACK ONLINE")
 
