@@ -3,6 +3,7 @@ import json
 import time
 import requests
 import subprocess
+import signal
 
 # =========================
 # CONFIG
@@ -54,8 +55,7 @@ def get_updates(offset=None):
         if offset:
             url += f"?offset={offset}"
 
-        r = requests.get(url, timeout=10)
-        return r.json()
+        return requests.get(url, timeout=10).json()
     except:
         return {"result": []}
 
@@ -77,7 +77,7 @@ def scan_code(code):
     return True, "OK"
 
 # =========================
-# ENGINE CORE
+# ENGINE CORE (ISOLATED)
 # =========================
 def deploy_app(name, code):
     path = f"deploy/{name}.py"
@@ -96,11 +96,14 @@ def deploy_app(name, code):
     try:
         log_file = open(log_path, "a")
 
+        # 🔥 ISOLATION FIX (IMPORTANT)
         process = subprocess.Popen(
             ["python3", path],
             stdout=log_file,
-            stderr=log_file
+            stderr=log_file,
+            preexec_fn=os.setsid
         )
+
     except Exception as e:
         return f"❌ Deploy failed: {e}"
 
@@ -115,18 +118,30 @@ def deploy_app(name, code):
 
     return f"🚀 DEPLOYED: {name}"
 
+# =========================
+# STOP (ISOLATED SAFE KILL)
+# =========================
 def stop_app(name):
     if name not in apps:
         return "❌ Not found"
 
     try:
-        os.kill(apps[name]["pid"], 9)
+        pid = apps[name]["pid"]
+
+        # kill whole process group
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+
         apps[name]["status"] = "stopped"
         save_db(apps)
-        return f"🛑 Stopped: {name}"
-    except:
-        return "❌ Failed"
 
+        return f"🛑 Stopped: {name}"
+
+    except Exception as e:
+        return f"❌ Failed: {e}"
+
+# =========================
+# LOGS
+# =========================
 def get_logs(name):
     if name not in apps:
         return "❌ App not found"
